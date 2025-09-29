@@ -32,6 +32,27 @@ sys_getppid(void)
 }
 
 uint64
+sys_getancestor(void)
+{
+  int n;
+  argint(0, &n);   
+
+  if (n < 0)
+    return -1;
+
+  struct proc *p = myproc();
+  while (n > 0 && p) {
+    p = p->parent;
+    n--;
+  }
+
+  if (p == 0)
+    return -1;
+
+  return p->pid;
+}
+
+uint64
 sys_fork(void)
 {
   return kfork();
