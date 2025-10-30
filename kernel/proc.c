@@ -29,6 +29,8 @@ struct spinlock wait_lock;
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
+
+
 void
 proc_mapstacks(pagetable_t kpgtbl)
 {
@@ -124,6 +126,8 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->tickets = 100;      // valor por defecto
+  p->run_slices = 0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -418,43 +422,58 @@ kwait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+// RNG simple en kernel (colócalo una sola vez, arriba en proc.c)
+static uint64 rng_state = 88172645463393265ULL;
+static inline uint64 krand(void) {
+  rng_state ^= rng_state >> 12;
+  rng_state ^= rng_state << 25;
+  rng_state ^= rng_state >> 27;
+  return rng_state * 2685821657736338717ULL;
+}
+
 void
 scheduler(void)
 {
-  struct proc *p;
   struct cpu *c = mycpu();
-
   c->proc = 0;
+
   for(;;){
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
     intr_on();
-    intr_off();
 
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
+    int total_tickets = 0;
+
+    // 1) Sumar tickets con locks
+    for(struct proc *p = proc; p < &proc[NPROC]; p++){
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+      if(p->state == RUNNABLE){
+        if(p->tickets < 1) p->tickets = 1; // robustez mínima
+        total_tickets += p->tickets;
       }
       release(&p->lock);
     }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wfi");
+
+    if(total_tickets <= 0)
+      continue;
+
+    int winner = (krand() % total_tickets) + 1;
+    int acc = 0;
+
+    // 2) Seleccionar ganador y ejecutar
+    for(struct proc *p = proc; p < &proc[NPROC]; p++){
+      acquire(&p->lock);
+      if(p->state == RUNNABLE){
+        acc += p->tickets;
+        if(acc >= winner){
+          p->run_slices++;
+          p->state = RUNNING;
+          c->proc = p;
+          swtch(&c->context, &p->context);  // <-- aquí estaba el error
+          c->proc = 0;
+          release(&p->lock);
+          break;
+        }
+      }
+      release(&p->lock);
     }
   }
 }
@@ -670,6 +689,7 @@ procdump(void)
   [RUNNING]   "run   ",
   [ZOMBIE]    "zombie"
   };
+
   struct proc *p;
   char *state;
 
@@ -677,11 +697,15 @@ procdump(void)
   for(p = proc; p < &proc[NPROC]; p++){
     if(p->state == UNUSED)
       continue;
+
     if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
       state = states[p->state];
     else
       state = "???";
-    printf("%d %s %s", p->pid, state, p->name);
-    printf("\n");
+
+    // Agregamos info de tickets y slices
+    printf("pid %d %s tickets=%d slices=%d\n",
+           p->pid, state, p->tickets, p->run_slices);
   }
 }
+

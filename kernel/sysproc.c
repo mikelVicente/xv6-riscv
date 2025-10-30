@@ -105,3 +105,24 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_settickets(void)
+{
+  int n;
+
+  // En tu versión, argint no devuelve valor: solo setea 'n'
+  argint(0, &n);
+
+  if(n < 1)
+    n = 1;
+
+  struct proc *p = myproc();
+
+  // Por seguridad, usa el lock al modificar campos del proceso
+  acquire(&p->lock);
+  p->tickets = n;
+  release(&p->lock);
+
+  return 0;
+}
