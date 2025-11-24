@@ -43,3 +43,5 @@ entry("sbrk");
 entry("pause");
 entry("uptime");
 entry("settickets");
+entry("mrdprotect");
+entry("munrdprotect");

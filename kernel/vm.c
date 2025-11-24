@@ -211,6 +211,54 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   }
 }
 
+// Cambia el bit PTE_R en un rango de páginas de usuario.
+// addr: dirección virtual inicial (debe estar alineada a página)
+// len: cantidad de páginas a modificar
+// clear = 1 => quitar permiso de lectura (mrdprotect)
+// clear = 0 => restaurar permiso de lectura (munrdprotect)
+int
+mrdprotect_range(pagetable_t pagetable, uint64 addr, int len, int clear)
+{
+  if(addr % PGSIZE != 0)
+    return -1;
+
+  if(len <= 0)
+    return -1;
+
+  uint64 a = addr;
+  uint64 last = addr + (uint64)len * PGSIZE;
+
+  // Primera pasada: validar todas las páginas
+  for(; a < last; a += PGSIZE){
+    pte_t *pte = walk(pagetable, a, 0);
+    if(pte == 0)
+      return -1;
+
+    if((*pte & PTE_V) == 0)
+      return -1;
+
+    // Debe ser memoria de usuario (no kernel)
+    if((*pte & PTE_U) == 0)
+      return -1;
+  }
+
+  // Segunda pasada: modificar los PTE
+  a = addr;
+  for(; a < last; a += PGSIZE){
+    pte_t *pte = walk(pagetable, a, 0);
+    if(clear)
+      *pte &= ~PTE_R;  // quitar permiso de lectura
+    else
+      *pte |= PTE_R;   // restaurar permiso de lectura
+  }
+
+  // Asegurar que el TLB se actualice
+  sfence_vma();
+
+  return 0;
+}
+
+
 // Allocate PTEs and physical memory to grow a process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 uint64

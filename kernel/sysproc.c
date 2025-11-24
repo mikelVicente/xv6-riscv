@@ -62,6 +62,52 @@ sys_sbrk(void)
   return addr;
 }
 
+extern int mrdprotect_range(pagetable_t pagetable, uint64 addr, int len, int clear);
+
+uint64
+sys_mrdprotect(void)
+{
+  uint64 addr;
+  int len;
+  struct proc *p = myproc();
+
+  // En tu xv6, argaddr y argint son void, no devuelven error
+  argaddr(0, &addr);
+  argint(1, &len);
+
+  if(len <= 0)
+    return -1;
+
+  // Verificar que el rango esté dentro del espacio de usuario del proceso
+  if(addr >= p->sz)
+    return -1;
+  if(addr + (uint64)len * PGSIZE > p->sz)
+    return -1;
+
+  return mrdprotect_range(p->pagetable, addr, len, 1);
+}
+
+uint64
+sys_munrdprotect(void)
+{
+  uint64 addr;
+  int len;
+  struct proc *p = myproc();
+
+  argaddr(0, &addr);
+  argint(1, &len);
+
+  if(len <= 0)
+    return -1;
+
+  if(addr >= p->sz)
+    return -1;
+  if(addr + (uint64)len * PGSIZE > p->sz)
+    return -1;
+
+  return mrdprotect_range(p->pagetable, addr, len, 0);
+}
+
 uint64
 sys_pause(void)
 {
